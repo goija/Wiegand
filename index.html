@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <title>VORTEX ENGINE v5.8</title>
+    <style>
+        :root { --cyan: #00d2ff; --green: #0f0; --orange: #ffaa00; --red: #ff4444; --bg: #050810; }
+        body { background: var(--bg); color: var(--cyan); font-family: 'Courier New', monospace; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .grid { display: grid; grid-template-columns: 350px 1fr; gap: 20px; max-width: 1100px; width: 100%; }
+        .panel { background: #0a0f1d; border: 1px solid var(--cyan); padding: 20px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,210,255,0.1); }
+        
+        /* Status Badges */
+        .status-row { display: flex; gap: 10px; margin-bottom: 20px; }
+        .badge { padding: 5px 12px; border: 1px solid #333; font-size: 11px; background: #000; color: #444; border-radius: 3px; font-weight: bold; }
+        .online { border-color: var(--green) !important; color: var(--green) !important; box-shadow: 0 0 10px var(--green); }
+        .error { border-color: var(--red) !important; color: var(--red) !important; box-shadow: 0 0 10px var(--red); }
+
+        /* UI Elements */
+        select, button { width: 100%; padding: 12px; margin: 8px 0; background: #000; color: var(--cyan); border: 1px solid var(--cyan); cursor: pointer; font-family: inherit; font-weight: bold; }
+        button:hover:not(:disabled) { background: var(--cyan); color: #000; }
+        button:disabled { opacity: 0.1; cursor: not-allowed; border-color: #222; }
+        #btnScan { border-color: var(--orange); color: var(--orange); }
+
+        /* Monitor & Console */
+        .monitor { height: 80px; background: #000; border: 1px solid #111; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; margin-bottom: 15px; }
+        .console { background: #000; height: 380px; overflow-y: auto; padding: 15px; font-size: 11px; color: #0f0; border: 1px solid #111; line-height: 1.5; }
+        .log-in { color: var(--cyan); }
+        .log-out { color: #ff00ff; }
+        .log-err { color: var(--red); }
+    </style>
+</head>
+<body>
+
+<div class="grid">
+    <div class="panel">
+        <div class="status-row">
+            <div id="wsBadge" class="badge">WSS OFFLINE</div>
+            <div id="p2pBadge" class="badge">P2P OFFLINE</div>
+        </div>
+        
+        <div id="idTag" style="font-size: 10px; color: #444; margin-bottom: 15px;">ID: ...</div>
+
+        <label style="font-size: 11px;">Apparaat Rol:</label>
+        <select id="roleSelect">
+            <option value="receiver">M2M MACHINE (Ontvanger)</option>
+            <option value="sender">VORTEX SCANNER (Zender)</option>
+        </select>
+
+        <button id="btnInit">1. INITIALISEER NETWERK</button>
+        <button id="btnTunnel" disabled>2. OPEN P2P TUNNEL</button>
+        <button id="btnScan" disabled>3. SIMULEER 26-BIT SCAN</button>
+    </div>
+
+    <div class="panel">
+        <div id="monitor" class="monitor">SYSTEM READY</div>
+        <div id="consoleLog" class="console">Wachtend op initialisatie...</div>
+    </div>
+</div>
+
+<script>
+    const myID = "VTX-" + Math.random().toString(36).substr(2, 5);
+    let ws, pc, dc, role;
+    let iceQueue = [];
+
+    const consoleEl = document.getElementById('consoleLog');
+    const monitorEl = document.getElementById('monitor');
+    const btnTunnel = document.getElementById('btnTunnel');
+    const btnScan = document.getElementById('btnScan');
+    const p2pBadge = document.getElementById('p2pBadge');
+    
+    document.getElementById('idTag').innerText = "Sessie ID: " + myID;
+
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString();
+        let colorClass = '';
+        if (type === 'in') colorClass = 'log-in';
+        if (type === 'out') colorClass = 'log-out';
+        if (type === 'err') colorClass = 'log-err';
+        
+        consoleEl.innerHTML += `<div><span style="color:#555">[${time}]</span> <span class="${colorClass}">${msg}</span></div>`;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    function sendSignal(data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            data.senderID = myID;
+            ws.send(JSON.stringify({ payload: data }));
+            log(`📤 Signaal verzonden: ${data.type || 'ICE'}`, 'out');
+        }
+    }
+
+    document.getElementById('btnInit').onclick = () => {
+        role = document.getElementById('roleSelect').value;
+        ws = new WebSocket("ws://127.0.0.1:1880/vortex");
+
+        ws.onopen = () => {
+            log("✅ Verbonden met Node-RED.");
+            document.getElementById('wsBadge').classList.add('online');
+            document.getElementById('wsBadge').innerText = "WSS ONLINE";
+            setupWebRTC();
+            if (role === 'sender') btnTunnel.disabled = false;
+        };
+
+        ws.onerror = () => {
+            log("❌ Kan niet verbinden met Node-RED (Signaling Server).", "err");
+        };
+
+        ws.onmessage = async (e) => {
+            const msg = JSON.parse(e.data);
+            const data = msg.payload || msg;
+
+            if (data.senderID === myID) return; // Filter echo
+
+            log(`📥 Signaal ontvangen: ${data.type || 'ICE'}`, 'in');
+
+            if (data.type === 'offer' && role === 'receiver') {
+                log("🔥 Offer ontvangen! Bezig met Answer...");
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sendSignal({ type: 'answer', answer: answer });
+                processIceQueue();
+            } 
+            else if (data.type === 'answer' && role === 'sender') {
+                log("🔥 Answer ontvangen! Tunnel verbinden...");
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                processIceQueue();
+            } 
+            else if (data.candidate) {
+                if (!pc.remoteDescription) iceQueue.push(data.candidate);
+                else try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e) {}
+            }
+        };
+    };
+
+    function setupWebRTC() {
+        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        
+        pc.onicecandidate = e => { if (e.candidate) sendSignal({ candidate: e.candidate }); };
+
+        // Toegevoegd: Foutafhandeling voor verbroken verbindingen
+        pc.onconnectionstatechange = () => {
+            log(`📡 P2P Status: ${pc.connectionState}`);
+            if (pc.connectionState === 'connected') {
+                p2pBadge.classList.remove('error');
+                p2pBadge.classList.add('online');
+                p2pBadge.innerText = "P2P ONLINE";
+            } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                p2pBadge.classList.remove('online');
+                p2pBadge.classList.add('error');
+                p2pBadge.innerText = "P2P OFFLINE";
+                btnScan.disabled = true;
+                log("❌ P2P verbinding verbroken.", "err");
+            }
+        };
+
+        if (role === 'sender') {
+            dc = pc.createDataChannel("vortex_data");
+            setupDCLogic();
+        } else {
+            pc.ondatachannel = (e) => {
+                dc = e.channel;
+                setupDCLogic();
+            };
+        }
+    }
+
+    function setupDCLogic() {
+        const handleOpen = () => {
+            log("🟢 DATAKANAAL OPEN", "in");
+            if (role === 'sender') btnScan.disabled = false;
+        };
+
+        // Toegevoegd: Fix voor de race condition (check of readyState al open is)
+        if (dc.readyState === 'open') {
+            handleOpen();
+        } else {
+            dc.onopen = handleOpen;
+        }
+
+        // Toegevoegd: Logica als het datakanaal sluit of faalt
+        dc.onclose = () => {
+            log("🔴 DATAKANAAL GESLOTEN", "err");
+            btnScan.disabled = true;
+        };
+
+        dc.onerror = (err) => {
+            log(`❌ Fout in datakanaal: ${err}`, "err");
+        };
+
+        dc.onmessage = (e) => {
+            const bits = e.data;
+            const cardID = parseInt(bits.substring(9, 25), 2); // Wiegand decode
+            monitorEl.innerText = "PAS: " + cardID;
+            log(`📥 DATA: ${bits} (ID: ${cardID})`);
+        };
+    }
+
+    async function processIceQueue() {
+        while(iceQueue.length > 0) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(iceQueue.shift())); } catch(e) {}
+        }
+    }
+
+    btnTunnel.onclick = async () => {
+        log("🚀 Tunnel graven... Offer versturen.");
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendSignal({ type: 'offer', offer: offer });
+    };
+
+    btnScan.onclick = () => {
+        if (dc && dc.readyState === 'open') {
+            const raw = "100000101" + Math.floor(Math.random()*65535).toString(2).padStart(16, '0') + "0";
+            dc.send(raw);
+            log(`📡 VERZONDEN: ${raw}`, "out");
+        } else {
+            log("❌ Fout: Tunnel niet open!", "err");
+        }
+    };
+</script>
+</body>
+</html>

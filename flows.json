@@ -1,0 +1,115 @@
+[
+    {
+        "id": "f1",
+        "type": "tab",
+        "label": "Vortex Fix",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "n1",
+        "type": "websocket in",
+        "z": "f1",
+        "name": "In",
+        "server": "aecedb17f24fbd99",
+        "client": "",
+        "x": 90,
+        "y": 120,
+        "wires": [
+            [
+                "d1",
+                "1a62692aad1416ec",
+                "efbd900702ef1f1b"
+            ]
+        ]
+    },
+    {
+        "id": "n3",
+        "type": "websocket out",
+        "z": "f1",
+        "name": "Out",
+        "server": "aecedb17f24fbd99",
+        "client": "",
+        "x": 510,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "d1",
+        "type": "debug",
+        "z": "f1",
+        "name": "Inkomend",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 270,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "d2",
+        "type": "debug",
+        "z": "f1",
+        "name": "Uitgaand",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 430,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "1a62692aad1416ec",
+        "type": "function",
+        "z": "f1",
+        "name": "function 1",
+        "func": "// 1. Verwijder de unieke sessie-ID van de afzender.\n// Hierdoor snapt de 'WebSocket Out' node dat het bericht\n// NIET als een 'reply' (alleen terug naar de zender) moet, \n// maar als een 'broadcast' (naar ALLE verbonden clients).\ndelete msg._session;\n\n// 2. Stuur het bericht (de payload met offer/answer/ICE) door\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 120,
+        "wires": [
+            [
+                "n3",
+                "d2"
+            ]
+        ]
+    },
+    {
+        "id": "efbd900702ef1f1b",
+        "type": "debug",
+        "z": "f1",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 240,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "aecedb17f24fbd99",
+        "type": "websocket-listener",
+        "path": "/vortex",
+        "wholemsg": "false"
+    }
+]

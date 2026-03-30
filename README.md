@@ -29,4 +29,40 @@ Het systeem leunt op drie hoofdcomponenten die naadloos samenwerken om de peer-t
 
 ## 🔄 Sequence Diagram: De Datastroom
 
-Hieronder is visueel weergegeven hoe de 'handshake' verloopt en hoe de verbinding uiteindelijk over
+Hieronder is visueel weergegeven hoe de 'handshake' verloopt en hoe de verbinding uiteindelijk overgaat in een directe offline P2P-tunnel.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Z as Zender (Scanner)
+    participant S as STUN Server (Google)
+    participant N as Node-RED (Signaling)
+    participant O as Ontvanger (Scherm)
+
+    Note over Z, O: Fase 1: Initialisatie & WebSockets
+    Z->>N: Verbinden met WSS (ws://127.0.0.1:1880)
+    O->>N: Verbinden met WSS (ws://127.0.0.1:1880)
+
+    Note over Z, O: Fase 2: IP & Route Ontdekking
+    Z->>S: Verzoek IP & Poort configuratie
+    S-->>Z: STUN Response 
+    O->>S: Verzoek IP & Poort configuratie
+    S-->>O: STUN Response 
+
+    Note over Z, O: Fase 3: De Handshake (via Node-RED)
+    Z->>N: Stuur SDP Offer
+    N->>O: Stuur Offer door
+    O->>N: Stuur SDP Answer
+    N->>Z: Stuur Answer door
+    
+    Z->>N: Stuur ICE Kandidaten (Netwerkroutes)
+    N->>O: Stuur ICE door
+    O->>N: Stuur ICE Kandidaten (Netwerkroutes)
+    N->>Z: Stuur ICE door
+
+    Note over Z, O: Fase 4: De P2P Tunnel (Node-RED stapt opzij)
+    Z--)O: 🟢 WebRTC DataChannel geopend (Directe P2P verbinding)
+
+    Note over Z, O: Fase 5: Apparaat Communicatie (Offline modus)
+    Z--)O: Verzenden ruwe Wiegand 26-bit data
+    Note right of O: Decodeer bitreeks & Toon Resultaat
